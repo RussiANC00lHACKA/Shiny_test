@@ -1,15 +1,47 @@
 from shiny import App, ui, reactive, render
 import numpy as np
 import plotly.express as px
-from sklearn.datasets import load_iris
-from sklearn.neighbors import KNeighborsClassifier
-import tempfile
 import pandas as pd
 
 # Загрузка данных
-iris = load_iris()
-X = iris.data[:, :2]  # Используем только два признака для простоты
-y = iris.target
+iris_data = {
+    'data': np.array([
+        [5.1, 3.5], [4.9, 3.0], [4.7, 3.2], [4.6, 3.1], [5.0, 3.6],
+        [5.4, 3.9], [4.6, 3.4], [5.0, 3.4], [4.4, 2.9], [4.9, 3.1],
+        [5.4, 3.7], [4.8, 3.4], [5.8, 2.7], [5.6, 3.0], [5.1, 3.3],
+        [5.7, 2.8], [5.1, 3.8], [5.4, 3.4], [5.1, 3.5], [5.5, 2.4],
+        [6.5, 2.8], [6.2, 2.9], [5.6, 2.9], [5.8, 4.0], [6.0, 2.2],
+        [5.6, 3.0], [5.7, 2.8], [5.4, 3.4], [5.5, 2.5], [6.1, 3.0],
+        [6.0, 2.7], [5.8, 4.1], [6.4, 2.8], [6.6, 3.0], [6.8, 2.8],
+        [6.7, 3.0], [6.0, 2.9], [5.7, 3.8], [5.5, 2.4], [5.6, 2.7],
+        [5.9, 3.2], [6.0, 2.9], [6.1, 2.9], [5.6, 3.0], [6.3, 2.5],
+        [6.5, 3.0], [7.6, 3.0], [6.8, 2.8], [6.7, 3.1], [6.1, 3.0],
+    ]),
+    'target': np.array([
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+        2, 2, 2, 2, 2, 2, 2, 2, 2, 2
+    ]),
+    'target_names': np.array(['Setosa', 'Versicolor', 'Virginica'])
+}
+
+# Функция для расчета расстояний
+def euclidean_distance(a, b):
+    return np.sqrt(np.sum((a - b) ** 2, axis=1))
+
+# Реализация k-NN
+def knn_classifier(X, y, new_point, k):
+    distances = euclidean_distance(X, new_point)
+    indices = np.argsort(distances)[:k]  # Найдем индексы k ближайших соседей
+    nearest_labels = y[indices]
+    
+    # Возвращаем класс с наибольшим числом соседей
+    unique, counts = np.unique(nearest_labels, return_counts=True)
+    majority_class = unique[np.argmax(counts)]
+    
+    return majority_class, indices  # Возвращаем также индексы
 
 # Интерфейс пользователя
 app_ui = ui.page_fluid(
@@ -19,115 +51,89 @@ app_ui = ui.page_fluid(
     ui.input_numeric("x1", "Признак 1 (например, длина чашелистика):", value=5.0),
     ui.input_numeric("x2", "Признак 2 (например, ширина чашелистика):", value=3.0),
     ui.input_slider("k", "Количество соседей (k):", min=1, max=10, value=3),
-    ui.input_checkbox("normalize", "Нормализовать данные?", value=True),
     ui.input_action_button("run", "Рассчитать"),
     
-    # Добавляем вывод результата сразу под кнопкой "Рассчитать"
-    ui.output_ui("result"),  # Используем output_ui для возможности форматирования
-    
-    # Делаем разметку с двумя колонками: одна для графика, другая для таблицы
+    ui.output_ui("result"),
     ui.row(
-        ui.column(6, ui.output_image("plot")),  # Левая колонка для графика
-        ui.column(6, 
-            ui.h4("Таблица ближайших соседей"),  # Добавляем заголовок для таблицы
-            ui.output_table("neighbors_table")   # Правая колонка для таблицы
-        )
+        ui.column(6, ui.output_ui("plot")),
+        ui.column(6, ui.h4("Таблица ближайших соседей"), ui.output_table("neighbors_table"))
     )
 )
 
 # Логика приложения
 def server(input, output, session):
-    # Реактивная функция, которая срабатывает при нажатии кнопки
     @reactive.event(input.run)
     def perform_calculation():
-        # Получаем введенные данные
         x1 = input.x1()
         x2 = input.x2()
         k = input.k()
-        normalize = input.normalize()
         
-        # Новый экземпляр для классификации
         new_point = np.array([[x1, x2]])
+        predicted_class, indices = knn_classifier(iris_data['data'], iris_data['target'], new_point, k)
         
-        # Нормализация данных, если выбрано
-        if normalize:
-            X_min = X.min(axis=0)
-            X_max = X.max(axis=0)
-            X_norm = (X - X_min) / (X_max - X_min)
-            new_point_norm = (new_point - X_min) / (X_max - X_min)
-        else:
-            X_norm = X
-            new_point_norm = new_point
-
-        # Создаем и обучаем модель k-NN
-        knn = KNeighborsClassifier(n_neighbors=k)
-        knn.fit(X_norm, y)
+        # Находим ближайших соседей
+        nearest_neighbors = iris_data['data'][indices]
+        neighbors_labels = iris_data['target'][indices]
+        neighbors_names = iris_data['target_names'][neighbors_labels]
         
-        # Выполняем классификацию
-        prediction = knn.predict(new_point_norm)
-        predicted_class = iris.target_names[prediction][0]
-        
-        # Найдем ближайших соседей
-        distances, indices = knn.kneighbors(new_point_norm)
-        nearest_neighbors = X_norm[indices[0]]
+        # Создаем таблицу соседей
+        neighbors_df = pd.DataFrame({
+            'Признак 1': nearest_neighbors[:, 0],
+            'Признак 2': nearest_neighbors[:, 1],
+            'Класс': neighbors_names  # Используем имена классов
+        })
 
-        # Создаем таблицу с информацией о ближайших соседях
-        neighbors_info = {
-            "Признак 1": nearest_neighbors[:, 0],
-            "Признак 2": nearest_neighbors[:, 1],
-            "Класс": iris.target_names[y[indices[0]]]
-        }
-        neighbors_df = pd.DataFrame(neighbors_info)
+        return predicted_class, new_point, nearest_neighbors, neighbors_df
 
-        # Возвращаем результат
-        return predicted_class, new_point_norm, X_norm, nearest_neighbors, knn, neighbors_df
-
-    # Связываем результат с интерфейсом
     @output
     @render.ui
     def result():
-        predicted_class, _, _, _, _, _ = perform_calculation()
-        # HTML форматирование текста
-        return ui.markdown(f"<h3 style='color: green;'>Новый экземпляр классифицирован как: <b>{predicted_class}</b></h3>")
+        predicted_class, _, _, _ = perform_calculation()
+        return ui.markdown(f"<h3 style='color: green;'>Новый экземпляр классифицирован как: <b>{iris_data['target_names'][predicted_class]}</b></h3>")
 
-    # Визуализация графика через сохранение в файл
     @output
-    @render.image
+    @render.ui
     def plot():
-        # Здесь распакуем все 6 значений
-        predicted_class, new_point_norm, X_norm, nearest_neighbors, knn, _ = perform_calculation()
+        predicted_class, new_point, nearest_neighbors, _ = perform_calculation()
 
-        # Построение границ принятия решения
-        h = 0.02  # Шаг сетки для визуализации
-        x_min, x_max = X_norm[:, 0].min() - 1, X_norm[:, 0].max() + 1
-        y_min, y_max = X_norm[:, 1].min() - 1, X_norm[:, 1].max() + 1
-        xx, yy = np.meshgrid(np.arange(x_min, x_max, h), np.arange(y_min, y_max, h))
-        Z = knn.predict(np.c_[xx.ravel(), yy.ravel()])
-        Z = Z.reshape(xx.shape)
+        fig = px.scatter(
+            x=iris_data['data'][:, 0], 
+            y=iris_data['data'][:, 1], 
+            color=iris_data['target_names'][iris_data['target']],  # Используем имена классов
+            labels={'x': 'Признак 1', 'y': 'Признак 2', 'color': 'Класс'},
+            title="Распределение данных и новый экземпляр",
+            width=700,  # Ширина графика
+            height=500  # Высота графика
+        )
 
-        # Построение графика с Plotly
-        fig = px.scatter(x=X_norm[:, 0], y=X_norm[:, 1], color=y.astype(str),
-                         labels={'x': 'Признак 1', 'y': 'Признак 2', 'color': 'Класс'},
-                         title="Распределение данных и новый экземпляр")
-        
-        # Добавляем новый экземпляр на график (фиолетовая большая точка)
-        fig.add_scatter(x=[new_point_norm[0][0]], y=[new_point_norm[0][1]], mode='markers', 
-                        marker=dict(size=15, color='purple'), name='Новый экземпляр')
-        
-        # Добавляем ближайших соседей на график с выделением желтым цветом
-        fig.add_scatter(x=nearest_neighbors[:, 0], y=nearest_neighbors[:, 1], mode='markers', 
-                        marker=dict(size=10, color='yellow'), name='Ближайшие соседи')
+        # Добавляем новый экземпляр на график
+        fig.add_scatter(
+            x=[new_point[0][0]], 
+            y=[new_point[0][1]], 
+            mode='markers', 
+            marker=dict(size=15, color='purple', symbol='star'), 
+            name='Новый экземпляр'
+        )
 
-        # Сохраняем график в файл с использованием временной директории
-        with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmpfile:
-            fig.write_image(tmpfile.name)
-            return {"src": tmpfile.name, "alt": "График k-NN"}
+        # Добавляем ближайшие соседи на график
+        if nearest_neighbors.size > 0:
+            fig.add_scatter(
+                x=nearest_neighbors[:, 0], 
+                y=nearest_neighbors[:, 1], 
+                mode='markers', 
+                marker=dict(size=10, color='yellow', symbol='x'), 
+                name='Ближайшие соседи'
+            )
 
-    # Таблица с информацией о ближайших соседях
+        # Убираем цветовую шкалу
+        fig.update_layout(coloraxis_showscale=False)
+
+        return ui.HTML(fig.to_html(full_html=False))
+
     @output
     @render.table
     def neighbors_table():
-        _, _, _, _, _, neighbors_df = perform_calculation()
+        _, _, _, neighbors_df = perform_calculation()
         return neighbors_df
 
 # Создаем приложение
