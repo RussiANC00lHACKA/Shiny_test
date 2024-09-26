@@ -1,0 +1,6 @@
+pathlib
+pandas
+seaborn
+shiny
+palmerpenguins
+sklearn
